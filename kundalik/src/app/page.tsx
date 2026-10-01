@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowUpRight, BookOpen, Bot, CalendarDays, CheckSquare, Clock3, Flame,
+  ArrowUpRight, BookOpen, CalendarDays, Clock3, Coffee, Flame,
   Moon, Search, Settings2, Sparkles, Sun,
 } from "lucide-react";
 import { BooksGrid } from "@/components/BooksGrid";
@@ -11,27 +12,31 @@ import { DayTabs } from "@/components/DayTabs";
 import { HomeworkDialog } from "@/components/HomeworkDialog";
 import { HomeworkList } from "@/components/HomeworkList";
 import { LessonCard } from "@/components/LessonCard";
-import { MittichaChat } from "@/components/MittichaChat";
+import { LiveClock } from "@/components/LiveClock";
 import { ProfileDialog } from "@/components/ProfileDialog";
 import { ScheduleSettingsDialog } from "@/components/ScheduleSettingsDialog";
+import { Sidebar } from "@/components/Sidebar";
 import { WeekSchedule } from "@/components/WeekSchedule";
+import { getSchoolDayIndex, isDayOffList } from "@/data/calendar";
+import { defaultBellReminderSettings, isBellReminderSettings } from "@/data/bellReminders";
+import type { HomeworkItem } from "@/data/homework";
+import { packsForSubject } from "@/data/packs";
 import {
-  defaultPeriods, defaultProfile, defaultProgress, isClassPeriodList,
+  defaultPeriods, defaultProfile, defaultProgress, getSystemColorTheme, isClassPeriodList, isLegacyDefaultPeriods,
   isColorTheme, isStudentProfile, isStudyProgress, localDateKey, type ClassPeriod,
 } from "@/data/preferences";
 import { subjects, week } from "@/data/schedule";
+import { isTestResults } from "@/data/testResults";
 import { useHomeworkStorage } from "@/hooks/useHomeworkStorage";
 import { usePersistentState } from "@/hooks/usePersistentState";
+import { formatBellStatusMessage, getCurrentStatus } from "@/utils/bellTime";
 
 type MainView = "schedule" | "homework" | "books";
 type ScheduleFilter = "today" | "tomorrow" | "week" | "day";
 
+const MittichaChat = lazy(() => import("@/components/MittichaChat").then((module) => ({ default: module.MittichaChat })));
 const weekdayNames = ["Yakshanba", "Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba"];
 const monthNames = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"];
-
-function schoolDayIndex(date: Date): number {
-  return date.getDay() === 0 ? 0 : Math.min(date.getDay() - 1, week.length - 1);
-}
 
 function formatRemaining(minutes: number): string {
   if (minutes < 60) return `${minutes} daqiqa`;
@@ -42,38 +47,52 @@ function formatRemaining(minutes: number): string {
 
 // Bosh sahifa jadval, topshiriq va saqlanadigan o'quvchi sozlamalarini birlashtiradi.
 export default function Home() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const now = new Date();
-  const todayIndex = schoolDayIndex(now);
+  const todayIndex = getSchoolDayIndex(now);
   const dateLabel = `${weekdayNames[now.getDay()]}, ${now.getDate()}-${monthNames[now.getMonth()]}`;
   const todayKey = localDateKey(now);
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = localDateKey(yesterday);
 
-  const [selectedDay, setSelectedDay] = useState(todayIndex);
+  const [selectedDay, setSelectedDay] = useState(todayIndex >= 0 ? todayIndex : 0);
   const [search, setSearch] = useState("");
-  const [activeView, setActiveView] = useState<MainView>("schedule");
+  const activeView: MainView = location.pathname === "/homework"
+    ? "homework"
+    : location.pathname === "/books" ? "books" : "schedule";
   const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>("today");
   const [dialogSubject, setDialogSubject] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editProfile, setEditProfile] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [currentMinute, setCurrentMinute] = useState(now.getHours() * 60 + now.getMinutes());
+  const [tutorPrompt, setTutorPrompt] = useState<string | null>(null);
+  const [currentMinute, setCurrentMinute] = useState(now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60);
 
   const [homework, updateHomework] = useHomeworkStorage();
   const [profile, updateProfile, profileLoaded] = usePersistentState("kundalik-profile", isStudentProfile, defaultProfile);
   const [periods, updatePeriods] = usePersistentState<ClassPeriod[]>("kundalik-periods", isClassPeriodList, defaultPeriods);
+  const [daysOff] = usePersistentState("kundalik-days-off", isDayOffList, []);
+  const [bellReminders] = usePersistentState("kundalik-bell-reminders", isBellReminderSettings, defaultBellReminderSettings);
   const [progress, updateProgress] = usePersistentState("kundalik-progress", isStudyProgress, defaultProgress);
-  const [theme, updateTheme] = usePersistentState<"light" | "dark">("kundalik-theme", isColorTheme, "light");
+  const [testResults, updateTestResults] = usePersistentState("kundalik-test-results", isTestResults, []);
+  const [theme, updateTheme] = usePersistentState<"light" | "dark">(
+    "kundalik-theme", isColorTheme, getSystemColorTheme(),
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       const current = new Date();
-      setCurrentMinute(current.getHours() * 60 + current.getMinutes());
+      setCurrentMinute(current.getHours() * 60 + current.getMinutes() + current.getSeconds() / 60);
     }, 30_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (isLegacyDefaultPeriods(periods)) updatePeriods(() => defaultPeriods);
+  }, [periods, updatePeriods]);
 
   const currentDay = week[selectedDay];
   const visibleLessons = useMemo(
@@ -83,6 +102,9 @@ export default function Home() {
     [currentDay, search],
   );
   const todayLessons = homework.filter((item) => !item.completed).length;
+  const currentBellStatus = getCurrentStatus(now, periods, daysOff);
+  const bellStatusMessage = formatBellStatusMessage(currentBellStatus, todayLessons, bellReminders.leadMinutes, now);
+  const bellStatusKey = JSON.stringify(currentBellStatus);
   const allHomeworkDone = homework.length > 0 && homework.every((item) => item.completed);
   const doneToday = progress.lastCompletedDate === todayKey && allHomeworkDone;
   const yesterdayDone = progress.lastCompletedDate === yesterdayKey;
@@ -90,11 +112,13 @@ export default function Home() {
   const relevantPeriods = periods.slice(0, currentDay.fanlar.length);
   const currentLessonIndex = relevantPeriods.findIndex((period) => currentMinute >= period.start && currentMinute < period.end);
   const nextLessonIndex = relevantPeriods.findIndex((period) => period.start > currentMinute);
+  const todayIsSchoolDay = todayIndex >= 0 && !daysOff.some((day) => day.date === todayKey);
+  const upcomingLessonIndex = currentLessonIndex >= 0 ? currentLessonIndex + 1 : nextLessonIndex;
   const tomorrowIndex = todayIndex === week.length - 1 ? 0 : todayIndex + 1;
 
   function selectFilter(filter: Exclude<ScheduleFilter, "day">) {
     setScheduleFilter(filter);
-    if (filter === "today") setSelectedDay(todayIndex);
+    if (filter === "today") setSelectedDay(todayIndex >= 0 ? todayIndex : 0);
     if (filter === "tomorrow") setSelectedDay(tomorrowIndex);
     setSearch("");
   }
@@ -109,7 +133,7 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     }, ...current]);
     setDialogSubject(null);
-    setActiveView("homework");
+    navigate("/homework");
   }
 
   function toggleHomework(id: string) {
@@ -137,6 +161,19 @@ export default function Home() {
     updateHomework((current) => current.filter((item) => item.id !== id));
   }
 
+  function editHomework(id: string, title: string) {
+    updateHomework((current) => current.map((item) => item.id === id ? { ...item, title } : item));
+  }
+
+  function startTutoring(item: HomeworkItem) {
+    setTutorPrompt(`${item.subject}: ${item.title}`);
+    setChatOpen(true);
+  }
+
+  function finishTutoring() {
+    setTutorPrompt(null);
+  }
+
   function saveProfile(value: typeof profile) {
     updateProfile(() => value);
     setEditProfile(false);
@@ -149,11 +186,12 @@ export default function Home() {
 
   return (
     <main className="app-shell" data-theme={theme}>
+      <Sidebar onOpenMitticha={() => setChatOpen(true)} />
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
 
       <header className="topbar">
-        <div className="brand">
+        <div className="brand mobile-brand">
           <span className="brand-mark"><CalendarDays size={21} /></span>
           <span>Kundalik<span className="brand-dot">.</span></span>
         </div>
@@ -198,17 +236,34 @@ export default function Home() {
           </motion.section>
 
           <div className="view-switch" aria-label="Bo'lim tanlash">
-            <button type="button" className={activeView === "schedule" ? "view-switch-active" : ""} onClick={() => setActiveView("schedule")}>Jadval</button>
-            <button type="button" className={activeView === "homework" ? "view-switch-active" : ""} onClick={() => setActiveView("homework")}>
+            <button type="button" className={activeView === "schedule" ? "view-switch-active" : ""} onClick={() => navigate("/")}>Jadval</button>
+            <button type="button" className={activeView === "homework" ? "view-switch-active" : ""} onClick={() => navigate("/homework")}>
               Vazifalar <span>{todayLessons}</span>
             </button>
-            <button type="button" className={activeView === "books" ? "view-switch-active" : ""} onClick={() => setActiveView("books")}>
+            <button type="button" className={activeView === "books" ? "view-switch-active" : ""} onClick={() => navigate("/books")}>
               <BookOpen size={13} /> Kitoblar
             </button>
           </div>
 
           {activeView === "schedule" ? (
             <section className="schedule-section">
+              <div className="schedule-live-row">
+                <LiveClock />
+                <motion.button
+                  key={bellStatusKey}
+                  className="bell-status-card"
+                  type="button"
+                  aria-label={`Mitticha aytadi: ${bellStatusMessage}. Suhbatni ochish`}
+                  onClick={() => setChatOpen(true)}
+                  initial={{ opacity: 0, y: 7 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: .24 }}
+                >
+                  <span className="bell-status-avatar">🐣</span>
+                  <span className="bell-status-copy"><b>Mitticha aytadi</b><span>{bellStatusMessage}</span></span>
+                  <Sparkles size={16} />
+                </motion.button>
+              </div>
               <div className="section-heading">
                 <div>
                   <span className="eyebrow muted-eyebrow">SENING REJANG</span>
@@ -265,15 +320,18 @@ export default function Home() {
                   periods={periods}
                   currentMinute={currentMinute}
                   todayIndex={todayIndex}
+                  todayIsSchoolDay={todayIsSchoolDay}
                   search={search}
                   onAddHomework={setDialogSubject}
                 />
               ) : (
                 <>
                   {scheduleFilter === "today" && (
-                    <div className={`time-status ${currentLessonIndex >= 0 ? "time-status-live" : ""}`}>
+                    <div className={`time-status ${todayIsSchoolDay && currentLessonIndex >= 0 ? "time-status-live" : ""}`}>
                       <Clock3 size={15} />
-                      {currentLessonIndex >= 0 ? (
+                      {!todayIsSchoolDay ? (
+                        <span>Bugun dars yo&apos;q. Yaxshi dam ol!</span>
+                      ) : currentLessonIndex >= 0 ? (
                         <span><b>Hozir:</b> {currentDay.fanlar[currentLessonIndex]} darsi davom etmoqda.</span>
                       ) : nextLessonIndex >= 0 ? (
                         <span><b>Keyingi darsgacha</b> {formatRemaining(relevantPeriods[nextLessonIndex].start - currentMinute)} qoldi.</span>
@@ -291,16 +349,46 @@ export default function Home() {
                       exit={{ opacity: 0, x: -8 }}
                       transition={{ duration: 0.2 }}
                     >
-                      {visibleLessons.map(({ name, index }) => (
-                        <LessonCard
-                          key={`${currentDay.kun}-${name}-${index}`}
-                          subject={subjects[name]}
-                          index={index}
-                          period={periods[index]}
-                          isCurrent={scheduleFilter === "today" && currentLessonIndex === index}
-                          onAddHomework={setDialogSubject}
-                        />
-                      ))}
+                      {(() => {
+                        const showBreak = visibleLessons.some(({ index }) => index === 2)
+                          && visibleLessons.some(({ index }) => index === 3);
+                        return visibleLessons.map(({ name, index }) => {
+                          const period = periods[index];
+                          if (!period) return null;
+                          const isTodaySelected = todayIsSchoolDay && selectedDay === todayIndex;
+                          const isCurrent = isTodaySelected && currentLessonIndex === index;
+                          return (
+                            <div className="day-lesson-group" key={`${currentDay.kun}-${name}-${index}`}>
+                              {index === 3 && showBreak && (
+                                <div className="large-break-divider"><Coffee size={13} /><span>Katta tanaffus</span><time>10:15 - 10:30</time></div>
+                              )}
+                              <LessonCard
+                                subject={subjects[name]}
+                                index={index}
+                                period={period}
+                                isCurrent={isCurrent}
+                                isPast={isTodaySelected && currentMinute >= period.end}
+                                isNext={isTodaySelected && upcomingLessonIndex === index}
+                                progressPercent={isCurrent
+                                  ? Math.min(100, Math.max(0, ((currentMinute - period.start) / (period.end - period.start)) * 100))
+                                  : undefined}
+                                packageProgress={packsForSubject(name).length > 0 ? (() => {
+                                  const pack = packsForSubject(name)[0];
+                                  const testDone = testResults.some((result) =>
+                                    result.subject === pack.fan && result.topic === pack.mavzu
+                                    && localDateKey(new Date(result.date)) === todayKey,
+                                  );
+                                  const homeworkDone = homework.some((item) =>
+                                    item.id === `offline-${pack.uyVazifa.id}-${todayKey}` && item.completed,
+                                  );
+                                  return { completed: (testDone ? pack.testlar.length : 0) + Number(homeworkDone), total: pack.testlar.length + 1 };
+                                })() : undefined}
+                                onAddHomework={setDialogSubject}
+                              />
+                            </div>
+                          );
+                        });
+                      })()}
                       {visibleLessons.length === 0 && (
                         <div className="empty-search">Bu nomda fan topilmadi. Qidiruvni o&apos;zgartirib ko&apos;ring.</div>
                       )}
@@ -310,7 +398,7 @@ export default function Home() {
               )}
             </section>
           ) : activeView === "homework" ? (
-            <HomeworkList homework={homework} onToggle={toggleHomework} onDelete={deleteHomework} />
+            <HomeworkList homework={homework} onToggle={toggleHomework} onDelete={deleteHomework} onTutor={startTutoring} onEdit={editHomework} />
           ) : (
             <BooksGrid subjects={Object.values(subjects)} />
           )}
@@ -361,21 +449,6 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      <nav className="mobile-bottom-nav" aria-label="Asosiy bo'limlar">
-        <button type="button" className={activeView === "schedule" ? "mobile-nav-active" : ""} onClick={() => { setActiveView("schedule"); selectFilter("today"); }}>
-          <CalendarDays size={18} /><span>Jadval</span>
-        </button>
-        <button type="button" className={activeView === "homework" ? "mobile-nav-active" : ""} onClick={() => setActiveView("homework")}>
-          <CheckSquare size={18} /><span>Vazifalar</span>
-        </button>
-        <button type="button" className={activeView === "books" ? "mobile-nav-active" : ""} onClick={() => setActiveView("books")}>
-          <BookOpen size={18} /><span>Kitoblar</span>
-        </button>
-        <button type="button" onClick={() => setChatOpen(true)}>
-          <Bot size={18} /><span>Mitticha</span>
-        </button>
-      </nav>
-
       <HomeworkDialog subject={dialogSubject} onClose={() => setDialogSubject(null)} onSave={saveHomework} />
       {showSettings && <ScheduleSettingsDialog periods={periods} onClose={() => setShowSettings(false)} onSave={savePeriods} />}
       {profileLoaded && (!profile.name.trim() || editProfile) && (
@@ -387,7 +460,19 @@ export default function Home() {
           onSave={saveProfile}
         />
       )}
-      <MittichaChat homework={homework} isOpen={chatOpen} onOpenChange={setChatOpen} />
+      <Suspense fallback={null}>
+        <MittichaChat
+          isOpen={chatOpen}
+          onOpenChange={(open) => { setChatOpen(open); if (!open) finishTutoring(); }}
+          tutorPrompt={tutorPrompt}
+          onTutorPromptHandled={() => setTutorPrompt(null)}
+          onAutoHomeworkTutor={startTutoring}
+          onHomeworkCompletion={(item) => updateHomework((current) => current.some((existing) => existing.id === item.id)
+            ? current.map((existing) => existing.id === item.id ? item : existing)
+            : [item, ...current])}
+          onTestResult={(result) => updateTestResults((current) => [...current, result].slice(-100))}
+        />
+      </Suspense>
       <footer className="page-footer"><span>Yaxshi reja — kunning yarmi! ✨</span><span>{profile.school} · {profile.grade}</span></footer>
     </main>
   );

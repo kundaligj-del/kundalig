@@ -1,4 +1,6 @@
 // O'quvchi profili, dars vaqtlari va streak yozuvining andozalari.
+import { bellSchedule } from "@/data/bellSchedule";
+
 export type StudentProfile = {
   name: string;
   school: string;
@@ -22,9 +24,15 @@ export const defaultProfile: StudentProfile = {
 };
 
 export const defaultPeriods: ClassPeriod[] = Array.from({ length: 6 }, (_, index) => ({
-  start: 8 * 60 + index * 50,
-  end: 8 * 60 + index * 50 + 45,
+  start: parseClock(bellSchedule[index].boshlanish),
+  end: parseClock(bellSchedule[index].tugash),
 }));
+
+export function isLegacyDefaultPeriods(periods: ClassPeriod[]): boolean {
+  return periods.length === 6 && periods.every((period, index) =>
+    period.start === 8 * 60 + index * 50 && period.end === 8 * 60 + index * 50 + 45,
+  );
+}
 
 export const defaultProgress: StudyProgress = { streak: 0, lastCompletedDate: null };
 
@@ -69,6 +77,11 @@ export function isStudyProgress(value: unknown): value is StudyProgress {
 
 export function isColorTheme(value: unknown): value is "light" | "dark" {
   return value === "light" || value === "dark";
+}
+
+export function getSystemColorTheme(): "light" | "dark" {
+  if (typeof window === "undefined") return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function formatClock(minutes: number): string {

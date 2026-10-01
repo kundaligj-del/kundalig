@@ -36,7 +36,7 @@ export function ScheduleSettingsDialog({ periods, onClose, onSave }: ScheduleSet
         <button className="dialog-close" type="button" onClick={onClose} aria-label="Yopish"><X size={18} /></button>
         <span className="eyebrow muted-eyebrow">JADVAL SOZLAMALARI</span>
         <h2 id="schedule-settings-title">Dars vaqtlarini sozla</h2>
-        <p className="dialog-hint">Standart: 08:00 dan, 45 daqiqa dars va 5 daqiqa tanaffus.</p>
+        <p className="dialog-hint">Darslar 45 daqiqa. 3- va 4-dars orasida 10:15–10:30 katta tanaffus, boshqa tanaffus yo&apos;q.</p>
         <form onSubmit={handleSubmit}>
           <div className="period-settings-list">
             {draft.map((period, index) => (

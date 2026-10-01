@@ -1,18 +1,19 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Clock3, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { daysBetweenDateKeys, getDateKey } from "@/data/calendar";
+import { Bot, Check, Clock3, Pencil, Save, Trash2, X } from "lucide-react";
 import type { HomeworkItem } from "@/data/homework";
 
 type HomeworkListProps = {
   homework: HomeworkItem[];
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
+  onTutor: (item: HomeworkItem) => void;
+  onEdit: (id: string, title: string) => void;
 };
 
 function daysUntil(date: string): number {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(`${date}T00:00:00`);
-  return Math.ceil((due.getTime() - today.getTime()) / 86_400_000);
+  return daysBetweenDateKeys(getDateKey(new Date()), date);
 }
 
 function displayDate(date: string): string {
@@ -21,7 +22,9 @@ function displayDate(date: string): string {
 }
 
 // Bajarilmagan vazifalarni yuqoriga, yaqin muddatlilarni qizil rangga chiqaradi.
-export function HomeworkList({ homework, onToggle, onDelete }: HomeworkListProps) {
+export function HomeworkList({ homework, onToggle, onDelete, onTutor, onEdit }: HomeworkListProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editedTitle, setEditedTitle] = useState("");
   const sorted = [...homework].sort((a, b) => {
     if (a.completed !== b.completed) return Number(a.completed) - Number(b.completed);
     if (!a.dueDate) return b.dueDate ? 1 : 0;
@@ -72,7 +75,16 @@ export function HomeworkList({ homework, onToggle, onDelete }: HomeworkListProps
                   </button>
                   <div className="homework-item-copy">
                     <span className="homework-subject">{item.subject}</span>
-                    <h3>{item.title}</h3>
+                    {editingId === item.id ? (
+                      <input
+                        className="homework-edit-input"
+                        aria-label={`${item.subject} vazifasini tahrirlash`}
+                        maxLength={400}
+                        value={editedTitle}
+                        onChange={(event) => setEditedTitle(event.target.value)}
+                      />
+                    ) : <h3>{item.title}</h3>}
+                    {item.taskType && <span className="homework-task-type">{item.taskType}</span>}
                     {item.dueDate && (
                       <span className="homework-deadline">
                         <Clock3 size={12} />
@@ -80,10 +92,43 @@ export function HomeworkList({ homework, onToggle, onDelete }: HomeworkListProps
                         {displayDate(item.dueDate)}
                       </span>
                     )}
+                    {item.difficulty && item.estimatedMinutes && (
+                      <span className="homework-ai-meta">
+                        {item.difficulty === "oson" ? "Oson" : item.difficulty === "orta" ? "O'rta" : "Qiyin"}
+                        <span>·</span>{item.estimatedMinutes} daqiqa
+                      </span>
+                    )}
+                    {item.source === "mitticha" && <span className="homework-source">🤖 Mitticha berdi</span>}
                   </div>
-                  <button type="button" className="delete-homework" onClick={() => onDelete(item.id)} aria-label={`${item.title} vazifasini o'chirish`}>
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="homework-item-actions">
+                    {editingId === item.id ? (
+                      <>
+                        <button type="button" className="homework-help-button" disabled={!editedTitle.trim()} onClick={() => {
+                          onEdit(item.id, editedTitle.trim());
+                          setEditingId(null);
+                        }}><Save size={14} /><span>Saqlash</span></button>
+                        <button type="button" className="delete-homework" onClick={() => setEditingId(null)} aria-label="Tahrirlashni bekor qilish"><X size={15} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="homework-help-button"
+                          onClick={() => onTutor(item)}
+                          aria-label={`${item.title} vazifasini Mitticha bilan yechish`}
+                        >
+                          <Bot size={14} /><span>Mitticha bilan yechish</span>
+                        </button>
+                        <button type="button" className="delete-homework" onClick={() => {
+                          setEditedTitle(item.title);
+                          setEditingId(item.id);
+                        }} aria-label={`${item.title} vazifasini tahrirlash`}><Pencil size={14} /></button>
+                      </>
+                    )}
+                    <button type="button" className="delete-homework" onClick={() => onDelete(item.id)} aria-label={`${item.title} vazifasini o'chirish`}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </motion.article>
               );
             })}
